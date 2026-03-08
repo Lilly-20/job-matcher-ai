@@ -378,10 +378,4 @@ chrome.runtime.onMessage.addListener((req) => {
   }
 });
 
-// 页面加载完后初始化
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", () => { initOverlay(); bindAnalyze(); });
-} else {
-  initOverlay();
-  bindAnalyze();
-}
+// 悬浮窗不自动初始化，只在点击插件图标后由 popup.js 触发
