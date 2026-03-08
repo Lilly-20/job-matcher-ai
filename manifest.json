@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Job Matcher AI",
+  "version": "1.0",
+  "description": "用AI分析职位是否适合你",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
