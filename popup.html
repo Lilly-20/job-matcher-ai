@@ -2,48 +2,47 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8" />
-  <link rel="stylesheet" href="style.css" />
-  <title>Job Matcher</title>
+  <style>
+    body {
+      width: 220px;
+      font-family: "Microsoft YaHei", sans-serif;
+      margin: 0;
+      background: #f5f7fa;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    h2 {
+      font-size: 14px;
+      color: #333;
+      margin: 0 0 8px;
+      text-align: center;
+    }
+    p {
+      font-size: 11px;
+      color: #888;
+      margin: 0 0 12px;
+      text-align: center;
+      line-height: 1.5;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      background: #4f46e5;
+      color: white;
+      border: none;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    button:hover { background: #4338ca; }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <h2>🎯 Job Matcher AI</h2>
-
-    <!-- 标签切换 -->
-    <div class="tabs">
-      <button class="tab active" data-tab="analyze">分析职位</button>
-      <button class="tab" data-tab="settings">⚙️ 我的设置</button>
-    </div>
-
-    <!-- 分析页 -->
-    <div id="tab-analyze" class="tab-content">
-      <button id="analyzeBtn">🔍 分析这个职位</button>
-      <div id="result"></div>
-    </div>
-
-    <!-- 设置页 -->
-    <div id="tab-settings" class="tab-content hidden">
-
-      <div class="section">
-        <label>👤 关于我（粘贴简历或自我介绍）</label>
-        <textarea id="aboutMe" rows="6" placeholder="例如：我是应届毕业生，统计学背景，对AI产品和大模型方向感兴趣，希望进入互联网大厂，性格偏内向，擅长数据分析和逻辑思考..."></textarea>
-      </div>
-
-      <div class="section">
-        <label>❌ 一定不要的条件（可选）</label>
-        <input id="rejectKeywords" type="text" placeholder="例如：销售, 外勤, 需要驾照" />
-      </div>
-
-      <div class="section">
-        <label>🔑 OpenRouter API Key</label>
-        <input id="apiKey" type="password" placeholder="粘贴你的API Key" />
-      </div>
-
-      <button id="saveBtn">💾 保存设置</button>
-      <div id="saveMsg"></div>
-    </div>
-
-  </div>
+  <h2>🎯 Job Matcher AI</h2>
+  <p>点击下方按钮，在当前页面打开悬浮窗。窗口固定在页面上，切换标签也不会消失。</p>
+  <button id="toggleBtn">打开 / 关闭 悬浮窗</button>
   <script src="popup.js"></script>
 </body>
 </html>
