@@ -10,6 +10,37 @@ window.__jmLoaded = true;
 var overlayEl = null;
 var currentTab = "analyze";
 
+// ── 安全调用 chrome API（插件更新后上下文失效时优雅处理）──
+function safeChrome(fn) {
+  try {
+    if (!chrome.runtime?.id) {
+      // 上下文已失效，提示用户刷新页面
+      showContextInvalid();
+      return;
+    }
+    fn();
+  } catch(e) {
+    if (e.message?.includes("Extension context invalidated")) {
+      showContextInvalid();
+    } else {
+      throw e;
+    }
+  }
+}
+
+function showContextInvalid() {
+  const overlay = document.getElementById("jm-overlay");
+  if (overlay) {
+    const body = overlay.querySelector("#jm-body");
+    if (body) {
+      body.innerHTML = `<div style="padding:16px;text-align:center;color:#ef4444">
+        ⚠️ 插件已更新，请刷新页面后重新使用。<br>
+        <small style="color:#9ca3af">Extension updated, please refresh the page.</small>
+      </div>`;
+    }
+  }
+}
+
 // ── 初始化悬浮窗 ──
 function initOverlay() {
   if (document.getElementById("jm-overlay")) return;
@@ -127,7 +158,7 @@ function switchTab(tab) {
     body.innerHTML = renderScanTab();
     bindScan();
   } else if (tab === "history") {
-    chrome.storage.local.get(["history"], (data) => {
+    safeChrome(() => chrome.storage.local.get(["history"], (data) => {
       body.innerHTML = renderHistoryTab(data.history);
       // 展开/收起历史
       body.querySelectorAll(".jm-history-item").forEach(item => {
@@ -137,19 +168,19 @@ function switchTab(tab) {
       if (clearBtn) {
         clearBtn.addEventListener("click", (e) => {
           e.stopPropagation();
-          chrome.storage.local.set({ history: [] });
+          safeChrome(() => chrome.storage.local.set({ history: [] }));
           body.innerHTML = `<div class="jm-empty">暂无历史记录</div>`;
         });
       }
     });
   } else if (tab === "settings") {
-    chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], (data) => {
+    safeChrome(() => chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], (data) => {
       body.innerHTML = renderSettingsTab(data);
       document.getElementById("jm-save-btn").addEventListener("click", () => {
         const aboutMe = document.getElementById("jm-about").value;
         const rejectKeywords = document.getElementById("jm-reject").value;
         const apiKey = document.getElementById("jm-apikey").value;
-        chrome.storage.local.set({ aboutMe, rejectKeywords, apiKey });
+        safeChrome(() => chrome.storage.local.set({ aboutMe, rejectKeywords, apiKey }));
         const msg = document.getElementById("jm-save-msg");
         msg.textContent = "✅ 已保存！";
         setTimeout(() => msg.textContent = "", 2000);
@@ -162,7 +193,7 @@ function switchTab(tab) {
 function bindAnalyze() {
   document.getElementById("jm-analyze-btn").addEventListener("click", () => {
     const resultDiv = document.getElementById("jm-result");
-    chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], async (data) => {
+    safeChrome(() => chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], async (data) => {
       const { aboutMe = "", rejectKeywords = "", apiKey = "" } = data;
       if (!apiKey) return showMsg(resultDiv, "请先去「⚙️ 设置」填写API Key！", "no-match");
       if (!aboutMe) return showMsg(resultDiv, "请先去「⚙️ 设置」填写你的简历！", "no-match");
@@ -194,8 +225,9 @@ ${pageText}
       `;
 
       try {
+        showMsg(resultDiv, "⏳ AI分析中，失败会自动重试（最多3次）...", "loading");
         const text = await callAI(apiKey, prompt);
-        if (!text) return showMsg(resultDiv, "AI无返回，请检查API Key。", "no-match");
+        if (!text) return showMsg(resultDiv, "❌ AI无返回，请稍后再试。", "no-match");
 
         const matched = text.includes("✅");
         showMsg(resultDiv, text, matched ? "match" : "no-match");
@@ -210,7 +242,14 @@ ${pageText}
           host: location.hostname
         });
       } catch (e) {
-        showMsg(resultDiv, "网络错误：" + e.message, "no-match");
+        const msg = e.message || "";
+        if (msg.includes("429") || msg.includes("rate") || msg.includes("limit")) {
+          showMsg(resultDiv, "⏳ 免费模型限流中，请等待1-2分钟后重试。", "no-match");
+        } else if (msg.includes("401") || msg.includes("auth") || msg.includes("key")) {
+          showMsg(resultDiv, "🔑 API Key无效，请在设置中检查。", "no-match");
+        } else {
+          showMsg(resultDiv, "❌ 请求失败：" + msg.slice(0, 80), "no-match");
+        }
       }
     });
   });
@@ -220,7 +259,7 @@ ${pageText}
 function bindScan() {
   document.getElementById("jm-scan-btn").addEventListener("click", () => {
     const scanDiv = document.getElementById("jm-scan-result");
-    chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], async (data) => {
+    safeChrome(() => chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], async (data) => {
       const { aboutMe = "", rejectKeywords = "", apiKey = "" } = data;
       if (!apiKey) return showMsg(scanDiv, "请先去「⚙️ 设置」填写API Key！", "no-match");
       if (!aboutMe) return showMsg(scanDiv, "请先去「⚙️ 设置」填写你的简历！", "no-match");
@@ -254,11 +293,19 @@ ${jobTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}
       `;
 
       try {
+        showMsg(scanDiv, `⏳ 找到 ${jobTitles.length} 个职位，AI筛选中（失败自动重试）...`, "loading");
         const text = await callAI(apiKey, prompt);
-        if (!text) return showMsg(scanDiv, "AI无返回，请检查API Key。", "no-match");
+        if (!text) return showMsg(scanDiv, "❌ AI无返回，请稍后再试。", "no-match");
         showMsg(scanDiv, `📋 从 ${jobTitles.length} 个职位中筛出：\n\n` + text, "scan-result");
       } catch (e) {
-        showMsg(scanDiv, "网络错误：" + e.message, "no-match");
+        const msg = e.message || "";
+        if (msg.includes("429") || msg.includes("rate") || msg.includes("limit")) {
+          showMsg(scanDiv, "⏳ 免费模型限流中，请等待1-2分钟后重试。", "no-match");
+        } else if (msg.includes("401") || msg.includes("auth") || msg.includes("key")) {
+          showMsg(scanDiv, "🔑 API Key无效，请在设置中检查。", "no-match");
+        } else {
+          showMsg(scanDiv, "❌ 请求失败：" + msg.slice(0, 80), "no-match");
+        }
       }
     });
   });
@@ -302,23 +349,57 @@ function isValidJobTitle(text) {
   return true;
 }
 
-// ── 调用 OpenRouter ──
-async function callAI(apiKey, prompt) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://job-matcher-extension",
-      "X-Title": "Job Matcher AI"
-    },
-    body: JSON.stringify({
-      model: "openrouter/free",
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-  const d = await res.json();
-  return d.choices?.[0]?.message?.content || null;
+// ── 调用 OpenRouter（自动重试3次）──
+async function callAI(apiKey, prompt, retries = 3) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://job-matcher-extension",
+          "X-Title": "Job Matcher AI"
+        },
+        body: JSON.stringify({
+          model: "openrouter/auto",
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+
+      const d = await res.json();
+
+      // 有真实内容，直接返回
+      if (d.choices?.[0]?.message?.content) {
+        return d.choices[0].message.content;
+      }
+
+      // 解析错误信息
+      const errMsg = d.error?.message || d.error?.code || JSON.stringify(d);
+
+      // 429限流 或 503服务不可用 → 等待后重试
+      if ((d.error?.code === 429 || res.status === 503 || res.status === 429) && attempt < retries) {
+        const wait = attempt * 2000; // 2s, 4s
+        throw new Error(`RETRY:${wait}:${errMsg}`);
+      }
+
+      // 其他错误直接抛出
+      throw new Error(errMsg);
+
+    } catch (e) {
+      const msg = e.message || "";
+      if (msg.startsWith("RETRY:") && attempt < retries) {
+        const parts = msg.split(":");
+        const waitMs = parseInt(parts[1]) || 2000;
+        const reason = parts.slice(2).join(":");
+        console.warn(`[JobMatcher] 第${attempt}次失败，${waitMs/1000}秒后重试。原因: ${reason}`);
+        await new Promise(r => setTimeout(r, waitMs));
+        continue;
+      }
+      if (attempt === retries) throw e;
+    }
+  }
+  return null;
 }
 
 // ── 工具函数 ──
@@ -328,11 +409,11 @@ function showMsg(el, text, cls) {
 }
 
 function saveHistory(entry) {
-  chrome.storage.local.get(["history"], (data) => {
+  safeChrome(() => chrome.storage.local.get(["history"], (data) => {
     const history = data.history || [];
     history.unshift({ ...entry, time: Date.now() });
     chrome.storage.local.set({ history: history.slice(0, 20) });
-  });
+  }));
 }
 
 // ── 拖拽功能 ──
