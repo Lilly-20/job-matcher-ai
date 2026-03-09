@@ -172,7 +172,7 @@ function switchTab(tab) {
           body.innerHTML = `<div class="jm-empty">暂无历史记录</div>`;
         });
       }
-    });
+    }));
   } else if (tab === "settings") {
     safeChrome(() => chrome.storage.local.get(["aboutMe", "rejectKeywords", "apiKey"], (data) => {
       body.innerHTML = renderSettingsTab(data);
@@ -185,7 +185,7 @@ function switchTab(tab) {
         msg.textContent = "✅ 已保存！";
         setTimeout(() => msg.textContent = "", 2000);
       });
-    });
+    }));
   }
 }
 
@@ -199,6 +199,7 @@ function bindAnalyze() {
       if (!aboutMe) return showMsg(resultDiv, "请先去「⚙️ 设置」填写你的简历！", "no-match");
 
       showMsg(resultDiv, "⏳ AI分析中，请稍候...", "loading");
+      /* safeChrome-analyze-open */
 
       const pageText = document.body.innerText.slice(0, 8000);
       const prompt = `
@@ -251,7 +252,7 @@ ${pageText}
           showMsg(resultDiv, "❌ 请求失败：" + msg.slice(0, 80), "no-match");
         }
       }
-    });
+    }));
   });
 }
 
@@ -264,39 +265,42 @@ function bindScan() {
       if (!apiKey) return showMsg(scanDiv, "请先去「⚙️ 设置」填写API Key！", "no-match");
       if (!aboutMe) return showMsg(scanDiv, "请先去「⚙️ 设置」填写你的简历！", "no-match");
 
-      showMsg(scanDiv, "⏳ 正在抓取职位列表...", "loading");
+      showMsg(scanDiv, "⏳ 正在读取页面内容...", "loading");
 
-      // 优化：只抓取真正的职位标题，过滤导航/筛选文字
-      const jobTitles = extractJobTitles();
-
-      if (jobTitles.length === 0) {
-        return showMsg(scanDiv, "未找到职位标题，请确认在职位列表页。", "no-match");
-      }
-
-      showMsg(scanDiv, `⏳ 找到 ${jobTitles.length} 个职位，AI筛选中...`, "loading");
+      // 直接把页面文字交给AI，让AI自己提取职位标题并筛选
+      // 不再依赖本地抓取逻辑，避免各种网站结构差异导致的错误
+      const pageText = document.body.innerText.slice(0, 6000);
 
       const prompt = `
-你是求职助手。根据用户背景，从以下职位名称中筛选出值得点进去看的岗位。
-无论职位名称是中文还是英文，请全部用中文回答。
+你是严格的求职顾问。下面是招聘列表页的文字内容。
 
-【用户背景摘要】
+第一步：识别所有真实职位名称（简短的岗位标题，排除导航、地点、学历、筛选条件等）。
+第二步：对每个职位做严格判断——只有当该职位的核心工作内容与用户背景直接匹配时，才推荐。
+
+【判断标准——必须同时满足】
+- 职位的主要工作内容与用户技能直接相关（不是"可能涉及"或"有机会接触"）
+- 不在用户的排除列表中
+- 不是纯技术开发、纯设计、纯财务会计类岗位（除非用户背景明确匹配）
+
+【用户背景】
 ${aboutMe.slice(0, 600)}
 ${rejectKeywords ? `\n【绝对不要的条件】${rejectKeywords}` : ""}
 
-【职位名称列表】
-${jobTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}
+【页面文字内容】
+${pageText}
 
-输出格式（每行一条，不要额外说明）：
-✅ 职位名称 — 一句话说明为什么值得看
-如果全部不匹配，输出：暂无明显匹配职位，建议查看下一页。
-❌ 不相关的职位直接跳过不列出。
+输出规则（严格执行）：
+- 只输出你确定推荐的职位，格式：✅ [原始职位名称] — 一句话说明核心匹配点
+- 不推荐的职位：一个字也不要写，直接跳过，不解释，不标注
+- 不要输出任何前言、总结、序号
+- 如果没有任何推荐，只输出：暂无明显匹配职位，建议查看下一页
       `;
 
       try {
-        showMsg(scanDiv, `⏳ 找到 ${jobTitles.length} 个职位，AI筛选中（失败自动重试）...`, "loading");
+        showMsg(scanDiv, "⏳ AI正在识别并筛选职位，请稍候...", "loading");
         const text = await callAI(apiKey, prompt);
         if (!text) return showMsg(scanDiv, "❌ AI无返回，请稍后再试。", "no-match");
-        showMsg(scanDiv, `📋 从 ${jobTitles.length} 个职位中筛出：\n\n` + text, "scan-result");
+        showMsg(scanDiv, "📋 粗筛结果：\n\n" + text, "scan-result");
       } catch (e) {
         const msg = e.message || "";
         if (msg.includes("429") || msg.includes("rate") || msg.includes("limit")) {
@@ -307,47 +311,80 @@ ${jobTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}
           showMsg(scanDiv, "❌ 请求失败：" + msg.slice(0, 80), "no-match");
         }
       }
-    });
+    }));
   });
 }
 
-// ── 智能提取职位标题 ──
+
+// ── 智能提取职位标题（基于视觉特征，不依赖关键词）──
 function extractJobTitles() {
-  const results = new Set();
+  const candidates = [];
 
-  // 策略1：优先找 <a> 或 heading 标签里的短文字（最像职位标题）
-  const primaryTags = document.querySelectorAll("h1, h2, h3, h4, a");
-  primaryTags.forEach(el => {
-    const text = el.innerText?.trim().replace(/\s+/g, " ");
-    if (isValidJobTitle(text)) results.add(text);
-  });
-
-  // 策略2：找包含"工程师|经理|专员|分析|运营|产品|设计|研究|算法|开发"等职位关键词的元素
-  const allEls = document.querySelectorAll("div, span, li, td, p");
-  const jobKeywords = /工程师|经理|专员|分析师|运营|产品|设计师|研究员|算法|开发|策划|顾问|architect|engineer|manager|analyst|designer|developer|intern|scientist|coordinator/i;
-  allEls.forEach(el => {
-    // 只看直接文字内容，不递归子节点（避免抓到整段描述）
-    const directText = Array.from(el.childNodes)
+  // 只取元素的直接文字子节点（不递归，避免抓整个卡片）
+  function directText(el) {
+    return Array.from(el.childNodes)
       .filter(n => n.nodeType === 3)
       .map(n => n.textContent.trim())
-      .join(" ")
-      .trim();
-    if (isValidJobTitle(directText) && jobKeywords.test(directText)) {
-      results.add(directText);
-    }
+      .join(" ").trim().replace(/\s+/g, " ");
+  }
+
+  // 文字是否像一个职位标题
+  function looksLikeTitle(text) {
+    if (!text || text.length < 2 || text.length > 60) return false;
+    if (/^\d+$/.test(text)) return false;
+    if (/^[\d]+[.、）)\]】]/.test(text)) return false;           // "1. 协助..."
+    if ((text.match(/[，。；]/g) || []).length >= 1) return false; // 含中文句号=长句
+    if (text.split(" ").length > 8) return false;                 // 英文超8词=长句
+    return true;
+  }
+
+  const seen = new Set();
+  function add(text, score) {
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    candidates.push({ text, score });
+  }
+
+  // 策略1：语义class（最可靠）—— 只取直接文字节点
+  document.querySelectorAll(
+    "[class*='job-name'],[class*='job_name'],[class*='job-title'],[class*='job_title']," +
+    "[class*='position-name'],[class*='position_name'],[class*='position-title']," +
+    "[class*='role-name'],[class*='role_title'],[class*='post-name'],[class*='post-title']"
+  ).forEach(el => {
+    const t = directText(el);
+    if (looksLikeTitle(t)) add(t, 4);
   });
 
-  return Array.from(results).slice(0, 50);
+  // 策略2：<a> 链接里的直接文字（不拿整个innerText，避免把卡片内容拼进来）
+  document.querySelectorAll("a").forEach(el => {
+    const t = directText(el);
+    if (!looksLikeTitle(t)) return;
+    const fw = parseInt(window.getComputedStyle(el).fontWeight) || 400;
+    const fs = parseFloat(window.getComputedStyle(el).fontSize) || 14;
+    if (fw >= 500 || fs >= 14) add(t, fw >= 600 ? 3 : 2);
+  });
+
+  // 策略3：加粗/放大的直接文字节点（heading 或 bold span/div）
+  document.querySelectorAll("h1,h2,h3,h4,div,span,li,p").forEach(el => {
+    const t = directText(el);
+    if (!looksLikeTitle(t)) return;
+    const fw = parseInt(window.getComputedStyle(el).fontWeight) || 400;
+    const fs = parseFloat(window.getComputedStyle(el).fontSize) || 14;
+    if (fw >= 600 || fs >= 16) add(t, fw >= 700 ? 2 : 1);
+  });
+
+  // 后处理：去掉被其他条目包含的冗余项（如 "商务运营管培生 Campus Hire..." 包含 "商务运营管培生"，只保留短的）
+  const final = candidates
+    .sort((a, b) => b.score - a.score || a.text.length - b.text.length)
+    .filter((item, _, arr) =>
+      !arr.some(other => other.text !== item.text && item.text.includes(other.text))
+    )
+    .map(c => c.text)
+    .slice(0, 50);
+
+  return final;
 }
 
-function isValidJobTitle(text) {
-  if (!text || text.length < 4 || text.length > 50) return false;
-  if (/^\d+$/.test(text)) return false;
-  // 过滤常见导航/筛选词
-  const navWords = /^(登录|注册|搜索|筛选|清除|更多|查看|返回|首页|下一页|上一页|城市|类型|部门|全部|正式|实习|校招|社招|submit|login|next|prev|home|filter|search|apply|back|menu|close|open|职能|支持|研发|运营|产品|销售|设计|市场|游戏|工作地点|北京|上海|深圳|杭州|成都|广州)$/i;
-  if (navWords.test(text)) return false;
-  return true;
-}
 
 // ── 调用 OpenRouter（自动重试3次）──
 async function callAI(apiKey, prompt, retries = 3) {
